@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PageCritic</title>
+<style>
+:root{--ink:#16233B;--mut:#5B6780;--bg:#F7F8FA;--card:#fff;--line:#D9DEE7;--ac:#0E7C7B;--acx:#fff;--bad:#B4531A;color-scheme:light dark}
+@media(prefers-color-scheme:dark){:root{--ink:#E8ECF3;--mut:#9AA6BF;--bg:#0F1624;--card:#17203A;--line:#2B3654;--ac:#4FC3C0;--acx:#0F1624;--bad:#F0A070}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+.wrap{max-width:720px;margin:0 auto;padding:20px 16px 56px}
+h1{font:700 2.2rem/1.1 Georgia,"Times New Roman",serif;margin:8px 0 4px;letter-spacing:-.02em}
+h2{font:700 1.2rem/1.3 Georgia,serif;margin:0 0 10px}
+.sub{margin:0 0 18px;color:var(--mut)}
+nav{display:flex;gap:6px;border-bottom:1px solid var(--line);margin-bottom:20px;overflow-x:auto}
+nav button{background:none;border:0;border-bottom:3px solid transparent;padding:10px 12px;font:inherit;color:var(--mut);cursor:pointer;white-space:nowrap;border-radius:0}
+nav button.on{color:var(--ink);border-bottom-color:var(--ac);font-weight:600}
+nav .out{margin-left:auto}
+section{margin-bottom:28px}
+article,fieldset{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px;margin:0 0 12px}
+legend{padding:0 6px;color:var(--mut)}
+label{display:block;margin:0 0 12px;font-size:.95rem}
+input,select,textarea{display:block;width:100%;margin-top:5px;padding:9px 10px;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px}
+input[type=radio],input[type=checkbox]{display:inline-block;width:auto;margin:0 8px 0 0}
+label.opt{display:flex;align-items:center;margin:6px 0}
+label.opt b{margin-left:auto}
+button{font:inherit;padding:8px 14px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+button.go{background:var(--ac);color:var(--acx);border-color:var(--ac);font-weight:600}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{outline:3px solid var(--ac);outline-offset:2px}
+.row{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:6px}
+.row b{overflow-wrap:anywhere}
+.muted{color:var(--mut)}.small{font-size:.85rem}
+.note{background:var(--card);border-left:4px solid var(--bad);padding:8px 12px;border-radius:4px}
+.tag{font-size:.8rem;padding:2px 9px;border-radius:99px;border:1px solid var(--line);color:var(--mut)}
+.tag.approved{border-color:var(--ac);color:var(--ac)}
+.rev{border-top:1px solid var(--line);padding-top:10px;margin:8px 0}
+.shots{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.shots img{height:90px;border-radius:4px;border:1px solid var(--line)}
+a{color:var(--ac)}
+footer{margin-top:40px;color:var(--mut);font-size:.85rem}
+</style></head><body>
+<div class="wrap">
+<h1>PageCritic</h1>
+<p class="sub">Real people test your site. You get checked, specific feedback.</p>
+<nav id="tabs"></nav>
+<main id="app"></main>
+<footer><a href="terms.html">Terms of Service</a> &nbsp; <a href="privacy.html">Privacy Policy</a></footer>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.0/dist/umd/supabase.js"></script>
+<script>
+// 1. Replace these two values with the ones from Supabase > Project Settings > API.
+const SUPABASE_URL='YOUR_SUPABASE_URL',SUPABASE_KEY='YOUR_SUPABASE_ANON_KEY';
+
+const P={1:5,2:9.8,4:19.4,6:29},FOCUS=['First impression','Checkout or sign-up flow','Mobile layout','Can you tell what it does?'];
+const ready=!SUPABASE_URL.startsWith('YOUR_');
+const sb=ready?supabase.createClient(SUPABASE_URL,SUPABASE_KEY):null;
+let me=null,admin=false,tab='owner',tasks=[],revs={},note='',draft={};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const m=n=>'$'+Number(n).toFixed(2);
+const safe=u=>/^https?:\/\//i.test(u)?esc(u):'#';
+const sub=()=>tasks.filter(t=>t.status==='submitted');
+const LABEL={open:'Waiting for a reviewer',claimed:'In progress',submitted:'Waiting for approval',approved:'Approved'};
+const tag=t=>`<span class="tag ${t.status}">${LABEL[t.status]}</span>`;
+const review=t=>{const r=revs[t.id];if(!r)return'';return `<div class="rev">${esc(r.body).replace(/\n/g,'<br>')}<div class="shots">${(r.shots||[]).filter(u=>/^https:\/\//.test(u)).map(u=>`<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="Reviewer screenshot"></a>`).join('')}</div></div>`};
+
+function authView(){return `<section><h2>Sign in or create an account</h2>
+ <label>Email<input data-d="em" type="email" autocomplete="email" value="${esc(draft.em||'')}"></label>
+ <label>Password (8+ characters)<input data-d="pw" type="password" autocomplete="current-password"></label>
+ <label class="opt"><input type="checkbox" data-d="age"${draft.age?' checked':''}>I’m 18 or older and agree to the <a href="terms.html">Terms</a> and <a href="privacy.html">Privacy Policy</a></label>
+ <button class="go" data-act="signin">Sign in</button> <button data-act="signup">Create account</button></section>`}
+
+function ownerView(){
+ const mine=tasks.filter(t=>t.owner_id===me.id);
+ return `<section><h2>Order reviews</h2>
+ <label>Your website address<input data-d="url" type="url" placeholder="https://" value="${esc(draft.url||'')}"></label>
+ <label>What should they focus on?<select data-d="focus">${FOCUS.map(f=>`<option${draft.focus===f?' selected':''}>${f}</option>`).join('')}</select></label>
+ <fieldset><legend>How many reviews?</legend>${Object.keys(P).map(q=>`<label class="opt"><input type="radio" name="q" data-d="q" value="${q}"${(draft.q||'1')===q?' checked':''}>${q} ${q==='1'?'review':'reviews'}<b>${m(P[q])}</b></label>`).join('')}</fieldset>
+ <button class="go" data-act="order">Place test order</button>
+ <p class="muted small">Test mode: no card is charged yet. You only see a review after it has been checked.</p></section>
+ <section><h2>Your reviews</h2>${mine.length?mine.map(t=>`<article><div class="row"><b>${esc(t.url)}</b>${tag(t)}</div><p class="muted small">Focus: ${esc(t.focus)}</p>${t.status==='approved'?review(t):''}</article>`).join(''):'<p class="muted">Nothing yet. Order your first review above.</p>'}</section>`;
+}
+
+function mineCard(t){
+ const head=`<div class="row"><b>${esc(t.url)}</b>${tag(t)}</div>`;
+ if(t.status!=='claimed')return `<article>${head}${t.status==='approved'?`<p>Paid ${m(t.pay)}</p>`:''}</article>`;
+ const sh=draft['sh'+t.id]||[];
+ return `<article>${head}<p class="muted small">Focus: ${esc(t.focus)}. <a href="${safe(t.url)}" target="_blank" rel="noopener noreferrer">Open the site</a></p>${t.note?`<p class="note">Sent back: ${esc(t.note)}</p>`:''}
+ <label>Your review (150+ words: what you tried, where you got stuck, how to fix it)<textarea data-d="txt${t.id}" rows="7">${esc(draft['txt'+t.id]||'')}</textarea></label>
+ <label>Screenshots (3 or more, PNG, JPG, WebP, or GIF)<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple data-up="${t.id}"></label>
+ <p class="muted small">${sh.length} uploaded</p>
+ <button class="go" data-act="submit" data-id="${t.id}">Send for approval</button></article>`;
+}
+
+function reviewerView(){
+ const open=tasks.filter(t=>t.status==='open'&&t.owner_id!==me.id);
+ const mine=tasks.filter(t=>t.reviewer_id===me.id);
+ const earned=mine.filter(t=>t.status==='approved').reduce((s,t)=>s+Number(t.pay),0);
+ return `<section><h2>Your reviews</h2><p class="muted">Earned so far: <b>${m(earned)}</b></p>${mine.length?mine.map(mineCard).join(''):'<p class="muted">Pick a site below to get started.</p>'}</section>
+ <section><h2>Sites waiting for a review</h2>${open.length?open.map(t=>`<article><div class="row"><b>${esc(t.url)}</b><button data-act="claim" data-id="${t.id}">Take this review</button></div><p class="muted small">Focus: ${esc(t.focus)}. Pays $1 to $2 once approved.</p></article>`).join(''):'<p class="muted">No sites waiting right now.</p>'}</section>`;
+}
+
+function adminView(){
+ const ap=tasks.filter(t=>t.status==='approved');
+ const held=tasks.filter(t=>t.status!=='approved').reduce((s,t)=>s+Number(t.price),0);
+ const paid=ap.reduce((s,t)=>s+Number(t.pay),0),cut=ap.reduce((s,t)=>s+Number(t.price)-Number(t.pay),0);
+ return `<section><h2>Money (test mode)</h2><p>Held until approved: <b>${m(held)}</b><br>Owed to reviewers: <b>${m(paid)}</b><br>Your share before card fees: <b>${m(cut)}</b></p></section>
+ <section><h2>Reviews to check</h2>${sub().length?sub().map(t=>{const r=revs[t.id]||{body:'',shots:[]};return `<article><div class="row"><b>${esc(t.url)}</b><span class="muted small">${r.body.trim().split(/\s+/).length} words, ${(r.shots||[]).length} screenshots</span></div>${review(t)}
+ <div class="row"><span>Approve and pay</span><span>${[1,1.5,2].map(p=>`<button data-act="approve" data-id="${t.id}" data-pay="${p}">${m(p)}</button>`).join(' ')}</span></div>
+ <label>Reason, if you send it back<input data-d="rj${t.id}" value="${esc(draft['rj'+t.id]||'')}"></label>
+ <button data-act="reject" data-id="${t.id}">Send back</button></article>`}).join(''):'<p class="muted">Nothing waiting.</p>'}</section>`;
+}
+
+function render(){
+ if(!ready){$('#tabs').innerHTML='';$('#app').innerHTML='<p class="note">Setup needed: open index.html and replace YOUR_SUPABASE_URL and YOUR_SUPABASE_ANON_KEY.</p>';return}
+ const tabs=me?[['owner','Get reviews'],['reviewer','Write reviews']].concat(admin?[['admin','Approve']]:[]):[];
+ $('#tabs').innerHTML=tabs.map(([k,l])=>`<button data-tab="${k}" class="${tab===k?'on':''}">${l}${k==='admin'&&sub().length?' ('+sub().length+')':''}</button>`).join('')+(me?'<button class="out" data-act="signout">Sign out</button>':'');
+ $('#app').innerHTML=(note?`<p class="note">${esc(note)}</p>`:'')+(me?({owner:ownerView,reviewer:reviewerView,admin:adminView})[tab]():authView());
+}
+
+async function load(){
+ if(!me)return render();
+ const t=await sb.from('tasks').select('*').order('created_at',{ascending:false});
+ if(t.error){note='Could not load data.';return render()}
+ tasks=t.data;
+ const r=await sb.from('reviews').select('*');
+ revs=Object.fromEntries((r.data||[]).map(x=>[x.task_id,x]));
+ render();
+}
+
+document.addEventListener('input',e=>{const k=e.target.dataset.d;if(k)draft[k]=e.target.type==='checkbox'?e.target.checked:e.target.value});
+document.addEventListener('change',async e=>{
+ const id=e.target.dataset.up;if(!id)return;
+ note='Uploading…';render();
+ try{
+  for(const f of [...e.target.files]){
+   const ext={'image/png':'png','image/jpeg':'jpg','image/webp':'webp','image/gif':'gif'}[f.type];
+   if(!ext||f.size>5242880)throw new Error('Use PNG, JPG, WebP, or GIF images under 5 MB.');
+   const path=`${me.id}/${crypto.randomUUID()}.${ext}`;
+   const up=await sb.storage.from('shots').upload(path,f,{contentType:f.type});if(up.error)throw up.error;
+   (draft['sh'+id]=draft['sh'+id]||[]).push(sb.storage.from('shots').getPublicUrl(path).data.publicUrl);
+  }
+  note='';
+ }catch(x){note=x.message||'Upload failed.'}
+ render();
+});
+document.addEventListener('click',async e=>{
+ const b=e.target.closest('[data-tab],[data-act]');if(!b)return;
+ if(b.dataset.tab){tab=b.dataset.tab;note='';return render()}
+ const a=b.dataset.act,id=b.dataset.id;note='';
+ const rpc=async(fn,args)=>{const r=await sb.rpc(fn,args);if(r.error)throw r.error};
+ try{
+  if(a==='signin'){const r=await sb.auth.signInWithPassword({email:(draft.em||'').trim(),password:draft.pw||''});if(r.error)throw r.error}
+  else if(a==='signup'){
+   if(!draft.age){note='Confirm you’re 18 or older and agree to the Terms to create an account.';return render()}
+   const r=await sb.auth.signUp({email:(draft.em||'').trim(),password:draft.pw||''});if(r.error)throw r.error;
+   note='Account created. Check your email to confirm it, then sign in.';
+  }
+  else if(a==='signout'){await sb.auth.signOut()}
+  else if(a==='order'){
+   const q=draft.q||'1';
+   await rpc('place_order',{p_url:(draft.url||'').trim(),p_focus:draft.focus||FOCUS[0],p_qty:Number(q)});
+   draft.url='';note=`Order placed: ${q} ${q==='1'?'review':'reviews'} for ${m(P[q])} (test mode).`;
+  }
+  else if(a==='claim'){await rpc('claim_task',{p_id:id})}
+  else if(a==='submit'){
+   await rpc('submit_review',{p_id:id,p_text:draft['txt'+id]||'',p_shots:draft['sh'+id]||[]});
+   delete draft['txt'+id];delete draft['sh'+id];
+  }
+  else if(a==='approve'){await rpc('approve_task',{p_id:id,p_pay:Number(b.dataset.pay)})}
+  else if(a==='reject'){await rpc('reject_task',{p_id:id,p_why:draft['rj'+id]||''});delete draft['rj'+id]}
+ }catch(x){note=x.message||'That didn’t save. Try again.'}
+ await load();
+});
+
+if(ready){
+ sb.auth.onAuthStateChange((_ev,s)=>{
+  me=s?s.user:null;draft.pw='';
+  setTimeout(async()=>{
+   if(!me){tasks=[];revs={};admin=false;return render()}
+   const r=await sb.rpc('is_admin');admin=!!r.data;load();
+  },0);
+ });
+ setInterval(()=>{if(me&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))load()},30000);
+}
+render();
+</script></body></html>
